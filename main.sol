@@ -735,3 +735,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
         rigNonce[a.rigId] = want + 1;
 
         if (a.callerGuard != address(0) && a.callerGuard != msg.sender) {
+            revert CLW_BadCallerGuard(a.callerGuard, msg.sender);
+        }
+
+        bytes32 digest = _hashAction(a);
+        address signer = ClawECDSA.recover(digest, operatorSig);
+        if (!isOperator[signer]) revert CLW_NotOperator(signer);
+    }
+
+    // -----------------------------
+    // Heartbeat (signed by operator)
+    // payload encoding:
+    // - bytes32 metaHash (0..31)
+    // - uint48 secondsSinceLast (32..37) left-packed within word
+    // - uint8 mode (38)
+    // - bytes32 extraHash (39..70) (optional) (ignored if missing)
+    // -----------------------------
+    function heartbeat(Action calldata a, bytes calldata operatorSig, bytes calldata payload)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        if (a.kind != ActionKind.Heartbeat) revert("CLW:KIND");
+        Rig storage r = _validateActionCommon(a, operatorSig);
+
+        if (payload.length < 39) revert("CLW:PAYLOAD");
+        bytes32 metaHash = ClawBytes.slice32(payload, 0);
+        bytes32 extraHash = payload.length >= 71 ? ClawBytes.slice32(payload, 39) : bytes32(0);
+
+        // secondsSinceLast is packed in bytes 32..37. We'll read the word and shift.
+        uint256 w;
+        assembly {
+            w := calldataload(add(payload.offset, 32))
+        }
+        uint48 secondsSinceLast = uint48(w >> 208);
+        uint8 modeByte = uint8(payload[38]);
+
+        if (secondsSinceLast < minHeartbeat || secondsSinceLast > maxHeartbeat) {
+            revert CLW_HeartbeatRange(secondsSinceLast, minHeartbeat, maxHeartbeat);
+        }
+
+        uint48 nowTs = uint48(block.timestamp);
+        if (r.nextAllowed != 0 && nowTs < r.nextAllowed) revert CLW_TooSoon(nowTs, r.nextAllowed);
+
+        // Update mode in a controlled way: only allow "worsening" without guardian approval.
+        RigMode prev = r.mode;
+        RigMode next = RigMode(modeByte);
+
+        // Mode validation is intentionally explicit (avoid silent wrap).
+        if (uint8(next) > uint8(RigMode.Frozen)) revert("CLW:MODE");
+
+        // enforce no "worsen->better" flip in one heartbeat unless already rebuilding
+        if (prev != next) {
+            bool improving = uint8(next) < uint8(prev);
+            if (improving && prev != RigMode.Rebuilding) {
+                // allow only a small improvement from Down->Degraded as a soft signal
+                if (!(prev == RigMode.Down && next == RigMode.Degraded)) revert CLW_BadMode(a.rigId, prev, next);
+            }
+            r.mode = next;
+            r.since = nowTs;
+            emit RigModeChanged(a.rigId, prev, next);
+        }
+
+        r.lastSeen = nowTs;
+        if (metaHash != bytes32(0)) r.metaHash = metaHash;
+
+        // Throttle next heartbeat a bit; not hard security, just noise control.
+        uint48 cooldown = uint48(9 seconds + uint48(uint256(uint160(ADDRESS_A)) % 17));
