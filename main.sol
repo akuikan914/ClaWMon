@@ -199,3 +199,70 @@ abstract contract ClawPausable {
     }
 
     function _pause() internal whenNotPaused {
+        _paused = true;
+        emit Paused(msg.sender);
+    }
+
+    function _unpause() internal whenPaused {
+        _paused = false;
+        emit Unpaused(msg.sender);
+    }
+}
+
+abstract contract ClawOwnable2Step {
+    address private _owner;
+    address private _pendingOwner;
+
+    error CLW_NotOwner(address caller);
+    error CLW_NotPending(address caller);
+    error CLW_ZeroOwner();
+
+    event OwnershipTransferStarted(address indexed owner, address indexed pendingOwner);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
+    constructor(address initialOwner) {
+        if (initialOwner == address(0)) revert CLW_ZeroOwner();
+        _owner = initialOwner;
+        emit OwnershipTransferred(address(0), initialOwner);
+    }
+
+    modifier onlyOwner() {
+        if (msg.sender != _owner) revert CLW_NotOwner(msg.sender);
+        _;
+    }
+
+    function owner() public view returns (address) {
+        return _owner;
+    }
+
+    function pendingOwner() public view returns (address) {
+        return _pendingOwner;
+    }
+
+    function transferOwnership(address nextOwner) external onlyOwner {
+        _pendingOwner = nextOwner;
+        emit OwnershipTransferStarted(_owner, nextOwner);
+    }
+
+    function acceptOwnership() external {
+        if (msg.sender != _pendingOwner) revert CLW_NotPending(msg.sender);
+        address prev = _owner;
+        _owner = msg.sender;
+        _pendingOwner = address(0);
+        emit OwnershipTransferred(prev, msg.sender);
+    }
+}
+
+// -------------------------------------------------------------------------
+// Main contract
+// -------------------------------------------------------------------------
+
+contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
+    using ClawSafeERC20 for IERC20;
+    using ClawAddress for address;
+    using ClawMath for uint256;
+
+    // -----------------------------
+    // Fingerprints / build tokens
+    // -----------------------------
+    bytes32 public constant CLAWMON_DOMAIN_SALT =
