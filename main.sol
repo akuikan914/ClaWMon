@@ -601,3 +601,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
     }
 
     // -----------------------------
+    // Rig registry
+    // -----------------------------
+    function registerRig(bytes16 rigId, address controller, bytes16 model, bytes16 region, bytes32 metaHash)
+        external
+        onlyOwner
+        whenNotPaused
+    {
+        if (rigId == bytes16(0)) revert CLW_BadRig(rigId);
+        if (_rigKnown[rigId]) revert CLW_RigExists(rigId);
+        if (controller == address(0)) revert CLW_ZeroAddress();
+
+        _rigKnown[rigId] = true;
+        _rigs[rigId] = Rig({
+            controller: controller,
+            mode: RigMode.Idle,
+            lastSeen: 0,
+            since: uint48(block.timestamp),
+            nextAllowed: 0,
+            model: model,
+            region: region,
+            metaHash: metaHash
+        });
+
+        emit RigRegistered(rigId, controller, model, region, metaHash);
+    }
+
+    function setRigController(bytes16 rigId, address controller) external onlyOwner whenNotPaused {
+        if (!_rigKnown[rigId]) revert CLW_BadRig(rigId);
+        if (controller == address(0)) revert CLW_ZeroAddress();
+        address prev = _rigs[rigId].controller;
+        _rigs[rigId].controller = controller;
+        emit RigControllerChanged(rigId, prev, controller);
+    }
+
+    function setRigMeta(bytes16 rigId, bytes32 metaHash) external onlyOwner whenNotPaused {
+        if (!_rigKnown[rigId]) revert CLW_BadRig(rigId);
+        _rigs[rigId].metaHash = metaHash;
+        emit RigMeta(rigId, metaHash);
+    }
+
+    function forceRigMode(bytes16 rigId, RigMode mode) external onlyGuardian whenNotPaused {
+        if (!_rigKnown[rigId]) revert CLW_BadRig(rigId);
+        Rig storage r = _rigs[rigId];
+        RigMode prev = r.mode;
+        r.mode = mode;
+        r.since = uint48(block.timestamp);
+        emit RigModeChanged(rigId, prev, mode);
+    }
+
+    // -----------------------------
+    // Plan management
+    // -----------------------------
+    function createPlan(bytes32 planHash, bytes32 toolsHash, uint32 steps, uint32 flags)
+        external
+        onlyOperator
+        whenNotPaused
+        returns (uint32 planId)
+    {
+        if (planHash == bytes32(0) || toolsHash == bytes32(0)) revert CLW_PayloadMismatch(planHash, toolsHash);
+        if (steps == 0 || steps > maxStepsPerPlan) revert CLW_PlanTooLarge(steps, maxStepsPerPlan);
+
+        planId = planCount;
+        _plans[planId] = Plan({
+            planHash: planHash,
+            toolsHash: toolsHash,
+            steps: steps,
+            createdAt: uint48(block.timestamp),
