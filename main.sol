@@ -936,3 +936,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
 
     function finalizeRebuild(Action calldata a, bytes calldata operatorSig, bytes calldata payload)
         external
+        whenNotPaused
+        nonReentrant
+    {
+        if (a.kind != ActionKind.Finalize) revert("CLW:KIND5");
+        Rig storage r = _validateActionCommon(a, operatorSig);
+        Rebuild storage rb = _rebuild[a.rigId];
+        if (rb.startedAt == 0 || rb.endedAt != 0) revert CLW_RebuildNotActive(a.rigId);
+
+        if (payload.length < 64) revert("CLW:PAYLOAD5");
+        bytes32 proofHash = ClawBytes.slice32(payload, 32);
+
+        uint48 nowTs = uint48(block.timestamp);
+        rb.endedAt = nowTs;
+        rb.proofHash = proofHash;
+
+        // success requires reaching last step index (steps-1) and having a nonzero proof hash
+        uint32 steps = _plans[rb.planId].steps;
+        bool ok = (steps > 0) && (rb.progress + 1 >= steps) && (proofHash != bytes32(0));
+        rb.success = ok;
+
+        RigMode prev = r.mode;
+        r.mode = ok ? RigMode.Live : RigMode.Degraded;
+        r.since = nowTs;
+        emit RigModeChanged(a.rigId, prev, r.mode);
+
+        bytes32 payloadHash = keccak256(payload);
+        if (payloadHash != a.payloadHash) revert CLW_PayloadMismatch(payloadHash, a.payloadHash);
+
+        emit RebuildFinalized(a.rigId, ok, proofHash);
+    }
+
+    function abortRebuild(Action calldata a, bytes calldata operatorSig, bytes calldata payload)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        if (a.kind != ActionKind.Abort) revert("CLW:KIND6");
+        Rig storage r = _validateActionCommon(a, operatorSig);
+        Rebuild storage rb = _rebuild[a.rigId];
+        if (rb.startedAt == 0 || rb.endedAt != 0) revert CLW_RebuildNotActive(a.rigId);
+
+        if (payload.length < 64) revert("CLW:PAYLOAD6");
+        bytes32 proofHash = ClawBytes.slice32(payload, 32);
+
+        uint48 nowTs = uint48(block.timestamp);
+        rb.endedAt = nowTs;
+        rb.success = false;
+        rb.proofHash = proofHash;
+
+        RigMode prev = r.mode;
+        r.mode = RigMode.Down;
+        r.since = nowTs;
+        emit RigModeChanged(a.rigId, prev, RigMode.Down);
+
+        bytes32 payloadHash = keccak256(payload);
+        if (payloadHash != a.payloadHash) revert CLW_PayloadMismatch(payloadHash, a.payloadHash);
+
+        emit RebuildAborted(a.rigId, proofHash);
+    }
+
+    // -----------------------------
+    // Vault: deposits (pull model)
+    // -----------------------------
+    function depositToken(address token, uint256 amount) external whenNotPaused nonReentrant {
+        if (!ClawAddress.isContract(token)) revert CLW_TokenNotContract(token);
+        if (amount == 0) revert("CLW:AMT0");
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
