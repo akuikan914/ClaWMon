@@ -65,3 +65,70 @@ library ClawAddress {
         }
         revert(fallbackErr);
     }
+}
+
+library ClawSafeERC20 {
+    using ClawAddress for address;
+
+    function safeTransfer(IERC20 token, address to, uint256 amount) internal {
+        bytes memory ret = address(token).call(abi.encodeWithSelector(token.transfer.selector, to, amount), "CLAW:T");
+        if (ret.length > 0 && !abi.decode(ret, (bool))) revert("CLAW:T_FALSE");
+    }
+
+    function safeTransferFrom(IERC20 token, address from, address to, uint256 amount) internal {
+        bytes memory ret =
+            address(token).call(abi.encodeWithSelector(token.transferFrom.selector, from, to, amount), "CLAW:TF");
+        if (ret.length > 0 && !abi.decode(ret, (bool))) revert("CLAW:TF_FALSE");
+    }
+
+    function safeApprove(IERC20 token, address spender, uint256 amount) internal {
+        bytes memory ret =
+            address(token).call(abi.encodeWithSelector(token.approve.selector, spender, amount), "CLAW:A");
+        if (ret.length > 0 && !abi.decode(ret, (bool))) revert("CLAW:A_FALSE");
+    }
+
+    function forceApprove(IERC20 token, address spender, uint256 amount) internal {
+        bytes memory ret =
+            address(token).call(abi.encodeWithSelector(token.approve.selector, spender, amount), "CLAW:FA");
+        if (ret.length > 0 && !abi.decode(ret, (bool))) {
+            safeApprove(token, spender, 0);
+            safeApprove(token, spender, amount);
+        }
+    }
+}
+
+library ClawECDSA {
+    // malleability guard uses secp256k1n/2
+    uint256 internal constant _SECP256K1N_HALF =
+        0x7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0;
+
+    function toEthSignedMessageHash(bytes32 h) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", h));
+    }
+
+    function recover(bytes32 digest, bytes memory sig) internal pure returns (address) {
+        if (sig.length != 65) revert("CLAW:SIG_LEN");
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+        assembly {
+            r := mload(add(sig, 32))
+            s := mload(add(sig, 64))
+            v := byte(0, mload(add(sig, 96)))
+        }
+        if (v < 27) v += 27;
+        if (v != 27 && v != 28) revert("CLAW:SIG_V");
+        if (uint256(s) > _SECP256K1N_HALF) revert("CLAW:SIG_S");
+        address signer = ecrecover(digest, v, r, s);
+        if (signer == address(0)) revert("CLAW:SIG_Z");
+        return signer;
+    }
+}
+
+library ClawMath {
+    function min(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a < b ? a : b;
+    }
+
+    function max(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a > b ? a : b;
