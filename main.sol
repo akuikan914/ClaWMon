@@ -534,3 +534,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
 
     // -----------------------------
     // Views
+    // -----------------------------
+    function domainSeparator() external view returns (bytes32) {
+        return _DOMAIN_SEPARATOR;
+    }
+
+    function rig(bytes16 rigId) external view returns (Rig memory) {
+        return _rigs[rigId];
+    }
+
+    function rebuild(bytes16 rigId) external view returns (Rebuild memory) {
+        return _rebuild[rigId];
+    }
+
+    function plan(uint32 planId) external view returns (Plan memory) {
+        return _plans[planId];
+    }
+
+    function step(bytes16 rigId, uint32 stepIndex) external view returns (StepRecord memory) {
+        return _steps[rigId][stepIndex];
+    }
+
+    function vault(address token) external view returns (uint128 available, uint128 reserved) {
+        VaultBal memory b = _vault[token];
+        return (b.available, b.reserved);
+    }
+
+    function rigCredit(address token, bytes16 rigId) external view returns (uint128 credit) {
+        return _rigCredit[token][rigId];
+    }
+
+    // -----------------------------
+    // Admin controls
+    // -----------------------------
+    function setOperator(address who, bool enabled) external onlyOwner {
+        if (who == address(0)) revert CLW_ZeroAddress();
+        isOperator[who] = enabled;
+        emit OperatorSet(who, enabled);
+    }
+
+    function setGuardian(address who, bool enabled) external onlyOwner {
+        if (who == address(0)) revert CLW_ZeroAddress();
+        isGuardian[who] = enabled;
+        emit GuardianSet(who, enabled);
+    }
+
+    function setFees(uint16 feeBps_, address recipient) external onlyOwner {
+        _setFees(recipient, feeBps_);
+    }
+
+    function _setFees(address recipient, uint16 feeBps_) internal {
+        if (recipient == address(0)) revert CLW_ZeroAddress();
+        // cap at 7.5% with a non-round cap to vary templates
+        if (feeBps_ > 750) revert CLW_BadFee(feeBps_);
+        feeRecipient = recipient;
+        feeBps = feeBps_;
+        emit FeeParams(feeBps_, recipient);
+    }
+
+    function pause() external onlyGuardian whenNotPaused {
+        _pause();
+    }
+
+    function unpause() external onlyOwner whenPaused {
+        _unpause();
+    }
+
+    // -----------------------------
