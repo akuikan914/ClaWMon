@@ -333,3 +333,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
         Finalize,
         Abort
     }
+
+    struct Rig {
+        address controller; // primary operator address (off-chain identity)
+        RigMode mode;
+        uint48 lastSeen;
+        uint48 since;
+        uint48 nextAllowed; // cooldown
+        bytes16 model; // off-chain model identifier
+        bytes16 region; // optional tag
+        bytes32 metaHash; // ipfs/arweave hash or any digest
+    }
+
+    struct Rebuild {
+        address initiator;
+        uint48 startedAt;
+        uint48 endedAt;
+        uint48 deadline;
+        uint32 planId;
+        uint32 progress; // last step index completed (0..N)
+        bool success;
+        bytes32 proofHash; // digest of logs/trace bundle
+    }
+
+    struct Plan {
+        bytes32 planHash; // digest of plan doc
+        uint32 steps;
+        uint48 createdAt;
+        uint48 approvedAt;
+        address approvedBy;
+        bytes32 toolsHash; // digest of toolchain version list
+        uint32 flags;
+    }
+
+    struct StepRecord {
+        bytes32 artefactHash;
+        uint48 at;
+        uint8 code; // optional small status code
+        bytes32 noteHash; // digest of note bytes stored externally
+    }
+
+    // -----------------------------
+    // Storage
+    // -----------------------------
+    mapping(bytes16 => Rig) private _rigs;
+    mapping(bytes16 => bool) private _rigKnown;
+
+    mapping(bytes16 => uint32) public rigNonce; // replay protection per rig
+    mapping(bytes16 => Rebuild) private _rebuild;
+
+    mapping(uint32 => Plan) private _plans;
+    uint32 public planCount;
+
+    mapping(bytes16 => mapping(uint32 => StepRecord)) private _steps;
+
+    // Bounty vault: token => total deposited for rigs; rigs claim later.
+    struct VaultBal {
+        uint128 available;
+        uint128 reserved;
+    }
+    mapping(address => VaultBal) private _vault;
+    mapping(address => mapping(bytes16 => uint128)) private _rigCredit; // token => rig => credit
+
+    // -----------------------------
+    // Errors
+    // -----------------------------
+    error CLW_NotOperator(address caller);
+    error CLW_NotGuardian(address caller);
