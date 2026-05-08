@@ -1003,3 +1003,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
         if (!ClawAddress.isContract(token)) revert CLW_TokenNotContract(token);
         if (amount == 0) revert("CLW:AMT0");
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+
+        VaultBal storage b = _vault[token];
+        uint256 next = uint256(b.available) + amount;
+        if (next > type(uint128).max) revert("CLW:V_OVER");
+        b.available = uint128(next);
+        emit VaultDeposited(token, amount, msg.sender);
+    }
+
+    function depositTokenWithPermit(address token, uint256 amount, uint256 deadline, uint8 v, bytes32 r, bytes32 s)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        if (!ClawAddress.isContract(token)) revert CLW_TokenNotContract(token);
+        if (amount == 0) revert("CLW:AMT0P");
+        try IERC20Permit(token).permit(msg.sender, address(this), amount, deadline, v, r, s) {} catch {}
+        IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
+
+        VaultBal storage b = _vault[token];
+        uint256 next = uint256(b.available) + amount;
+        if (next > type(uint128).max) revert("CLW:V_OVER2");
+        b.available = uint128(next);
+        emit VaultDeposited(token, amount, msg.sender);
+    }
+
+    // optional ETH deposits through a dedicated function (no receive)
+    function depositETH() external payable whenNotPaused nonReentrant {
+        if (msg.value == 0) revert("CLW:ETH0");
+        // track ETH under a pseudo-token address
+        address pseudo = address(0);
+        VaultBal storage b = _vault[pseudo];
+        uint256 next = uint256(b.available) + msg.value;
+        if (next > type(uint128).max) revert("CLW:V_OVER3");
+        b.available = uint128(next);
+        emit VaultDeposited(pseudo, msg.value, msg.sender);
+    }
+
+    // -----------------------------
+    // Vault: allocation and claim
+    // -----------------------------
+    function allocateToRig(address token, bytes16 rigId, uint256 amount) external onlyGuardian whenNotPaused nonReentrant {
+        if (!_rigKnown[rigId]) revert CLW_BadRig(rigId);
+        if (amount == 0) revert("CLW:AL0");
+
+        VaultBal storage b = _vault[token];
+        if (uint256(b.available) < amount) revert CLW_Insufficient(b.available, amount);
+
+        uint256 feeTaken = (amount * feeBps) / 10_000;
+        uint256 credit = amount - feeTaken;
+
+        b.available = uint128(uint256(b.available) - amount);
+        b.reserved = uint128(uint256(b.reserved) + credit);
+
+        uint128 prev = _rigCredit[token][rigId];
+        uint256 next = uint256(prev) + credit;
+        if (next > type(uint128).max) revert("CLW:C_OVER");
+        _rigCredit[token][rigId] = uint128(next);
+
+        // fee becomes immediately claimable by feeRecipient via sweep
+        if (feeTaken > 0) {
+            b.available = uint128(uint256(b.available) + feeTaken);
+        }
+
+        emit VaultAllocated(token, rigId, credit, feeTaken);
+    }
+
+    function claim(address token, bytes16 rigId, address to, uint256 amount) external whenNotPaused nonReentrant {
