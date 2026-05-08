@@ -802,3 +802,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
 
         // Throttle next heartbeat a bit; not hard security, just noise control.
         uint48 cooldown = uint48(9 seconds + uint48(uint256(uint160(ADDRESS_A)) % 17));
+        r.nextAllowed = nowTs + cooldown;
+
+        bytes32 payloadHash = keccak256(payload);
+        if (payloadHash != a.payloadHash) revert CLW_PayloadMismatch(payloadHash, a.payloadHash);
+
+        // extraHash isn't stored; it just forces signature to cover larger bundles
+        emit Heartbeat(a.rigId, msg.sender, nowTs, r.mode, keccak256(abi.encode(metaHash, secondsSinceLast, modeByte, extraHash)));
+    }
+
+    // -----------------------------
+    // Rebuild lifecycle (signed actions)
+    // payload encoding:
+    // - uint32 planId (0..3) in a word
+    // - uint48 deadline (4..9) in the same word, left-packed
+    // - bytes32 proofHash (32..63) optional for abort/finalize
+    // - bytes32 commitHash (64..95) optional for commit-plan
+    // - uint32 stepIndex (96..99) + uint8 code (100) + bytes32 artefactHash (101..132) + bytes32 noteHash (133..164) for step marks
+    // -----------------------------
+    function startRebuild(Action calldata a, bytes calldata operatorSig, bytes calldata payload)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        if (a.kind != ActionKind.StartRebuild) revert("CLW:KIND2");
+        Rig storage r = _validateActionCommon(a, operatorSig);
+        if (r.mode == RigMode.Frozen) revert CLW_BadMode(a.rigId, RigMode.Frozen, r.mode);
+
+        Rebuild storage rb = _rebuild[a.rigId];
+        if (rb.startedAt != 0 && rb.endedAt == 0) revert CLW_RebuildActive(a.rigId);
+
+        if (payload.length < 32) revert("CLW:PAYLOAD2");
+        uint256 word;
+        assembly {
+            word := calldataload(payload.offset)
+        }
+        uint32 planId = uint32(word >> 224);
+        uint48 deadline = uint48(word >> 176);
+
+        if (planId >= planCount) revert CLW_NoPlan(planId);
+        Plan memory p = _plans[planId];
+        if (p.approvedAt == 0) revert("CLW:PLAN_NA");
+
+        uint48 nowTs = uint48(block.timestamp);
+        if (deadline <= nowTs + 30 seconds) revert CLW_Deadline(nowTs, deadline);
+
+        rb.initiator = msg.sender;
+        rb.startedAt = nowTs;
+        rb.endedAt = 0;
+        rb.deadline = deadline;
+        rb.planId = planId;
+        rb.progress = 0;
+        rb.success = false;
+        rb.proofHash = bytes32(0);
+
+        RigMode prev = r.mode;
+        r.mode = RigMode.Rebuilding;
+        r.since = nowTs;
+        emit RigModeChanged(a.rigId, prev, RigMode.Rebuilding);
+
+        bytes32 payloadHash = keccak256(payload);
+        if (payloadHash != a.payloadHash) revert CLW_PayloadMismatch(payloadHash, a.payloadHash);
+
+        emit RebuildStarted(a.rigId, msg.sender, planId, deadline);
+    }
+
+    function commitPlan(Action calldata a, bytes calldata operatorSig, bytes calldata payload)
+        external
