@@ -668,3 +668,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
             toolsHash: toolsHash,
             steps: steps,
             createdAt: uint48(block.timestamp),
+            approvedAt: 0,
+            approvedBy: address(0),
+            flags: flags
+        });
+        planCount = planId + 1;
+        emit PlanCreated(planId, planHash, toolsHash, steps, flags);
+    }
+
+    function approvePlan(uint32 planId) external onlyGuardian whenNotPaused {
+        if (planId >= planCount) revert CLW_NoPlan(planId);
+        Plan storage p = _plans[planId];
+        if (p.approvedAt == 0) {
+            p.approvedAt = uint48(block.timestamp);
+            p.approvedBy = msg.sender;
+            emit PlanApproved(planId, msg.sender);
+        }
+    }
+
+    // -----------------------------
+    // Signed action execution
+    // -----------------------------
+    struct Action {
+        bytes16 rigId;
+        uint32 nonce;
+        ActionKind kind;
+        uint48 validAfter;
+        uint48 validBefore;
+        bytes32 payloadHash;
+        address callerGuard;
+    }
+
+    function actionDigest(Action calldata a) external view returns (bytes32) {
+        return _hashAction(a);
+    }
+
+    function _hashAction(Action calldata a) internal view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                _ACTION_TYPEHASH,
+                a.rigId,
+                a.nonce,
+                uint8(a.kind),
+                a.validAfter,
+                a.validBefore,
+                a.payloadHash,
+                a.callerGuard
+            )
+        );
+        return keccak256(abi.encodePacked("\x19\x01", _DOMAIN_SEPARATOR, structHash));
+    }
+
+    function _validateActionCommon(Action calldata a, bytes calldata operatorSig) internal returns (Rig storage r) {
+        if (!_rigKnown[a.rigId]) revert CLW_BadRig(a.rigId);
+        r = _rigs[a.rigId];
+
+        uint48 nowTs = uint48(block.timestamp);
+        if (nowTs < a.validAfter || nowTs > a.validBefore) revert CLW_BadSigWindow(nowTs, a.validAfter, a.validBefore);
+        if (nowTs > a.validBefore) revert CLW_SigExpired(nowTs, a.validBefore);
+
+        uint48 ttl = a.validBefore - a.validAfter;
+        if (ttl > maxSigTtl) revert CLW_SigTooLong(ttl, maxSigTtl);
+
+        uint32 want = rigNonce[a.rigId];
+        if (a.nonce != want) revert CLW_BadNonce(a.nonce, want);
+        rigNonce[a.rigId] = want + 1;
+
+        if (a.callerGuard != address(0) && a.callerGuard != msg.sender) {
