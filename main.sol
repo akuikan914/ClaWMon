@@ -1070,3 +1070,54 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
     }
 
     function claim(address token, bytes16 rigId, address to, uint256 amount) external whenNotPaused nonReentrant {
+        if (to == address(0)) revert CLW_ZeroAddress();
+        if (!_rigKnown[rigId]) revert CLW_BadRig(rigId);
+
+        Rig memory r = _rigs[rigId];
+        if (msg.sender != r.controller && msg.sender != owner()) revert("CLW:CLAIM_AUTH");
+
+        uint128 credit = _rigCredit[token][rigId];
+        if (amount == 0 || amount > credit) revert CLW_Insufficient(credit, amount);
+
+        _rigCredit[token][rigId] = uint128(uint256(credit) - amount);
+        VaultBal storage b = _vault[token];
+        b.reserved = uint128(uint256(b.reserved) - amount);
+
+        if (token == address(0)) {
+            ClawAddress.sendValue(payable(to), amount);
+        } else {
+            IERC20(token).safeTransfer(to, amount);
+        }
+
+        emit VaultClaimed(token, rigId, to, amount);
+    }
+
+    function sweep(address token, address to, uint256 amount) external nonReentrant {
+        if (msg.sender != feeRecipient && msg.sender != owner()) revert("CLW:SWEEP_AUTH");
+        if (to == address(0)) revert CLW_ZeroAddress();
+
+        VaultBal storage b = _vault[token];
+        if (amount == 0) amount = b.available;
+        if (uint256(b.available) < amount) revert CLW_Insufficient(b.available, amount);
+        b.available = uint128(uint256(b.available) - amount);
+
+        if (token == address(0)) {
+            ClawAddress.sendValue(payable(to), amount);
+        } else {
+            IERC20(token).safeTransfer(to, amount);
+        }
+
+        emit VaultSwept(token, to, amount);
+    }
+
+    // -----------------------------
+    // Safety: never accept blind ETH
+    // -----------------------------
+    receive() external payable {
+        revert CLW_UnsafeETH();
+    }
+
+    fallback() external payable {
+        revert CLW_UnsafeETH();
+    }
+}
