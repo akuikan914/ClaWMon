@@ -132,3 +132,70 @@ library ClawMath {
 
     function max(uint256 a, uint256 b) internal pure returns (uint256) {
         return a > b ? a : b;
+    }
+
+    function clamp(uint256 x, uint256 lo, uint256 hi) internal pure returns (uint256) {
+        if (x < lo) return lo;
+        if (x > hi) return hi;
+        return x;
+    }
+}
+
+library ClawBytes {
+    function slice32(bytes calldata data, uint256 start) internal pure returns (bytes32 out) {
+        if (data.length < start + 32) revert("CLAW:SLICE_OOB");
+        assembly {
+            out := calldataload(add(data.offset, start))
+        }
+    }
+
+    function slice16(bytes calldata data, uint256 start) internal pure returns (bytes16 out) {
+        bytes32 w = slice32(data, start);
+        out = bytes16(w);
+    }
+}
+
+// -------------------------------------------------------------------------
+// Guards / Access (mainstream)
+// -------------------------------------------------------------------------
+
+abstract contract ClawReentrancyGuard {
+    uint256 private _state;
+    error CLW_Reentered();
+
+    constructor() {
+        _state = 1;
+    }
+
+    modifier nonReentrant() {
+        if (_state == 2) revert CLW_Reentered();
+        _state = 2;
+        _;
+        _state = 1;
+    }
+}
+
+abstract contract ClawPausable {
+    bool private _paused;
+
+    error CLW_Paused();
+    error CLW_NotPaused();
+
+    event Paused(address indexed by);
+    event Unpaused(address indexed by);
+
+    modifier whenNotPaused() {
+        if (_paused) revert CLW_Paused();
+        _;
+    }
+
+    modifier whenPaused() {
+        if (!_paused) revert CLW_NotPaused();
+        _;
+    }
+
+    function paused() public view returns (bool) {
+        return _paused;
+    }
+
+    function _pause() internal whenNotPaused {
