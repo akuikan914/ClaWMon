@@ -869,3 +869,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
 
     function commitPlan(Action calldata a, bytes calldata operatorSig, bytes calldata payload)
         external
+        whenNotPaused
+        nonReentrant
+    {
+        if (a.kind != ActionKind.CommitPlan) revert("CLW:KIND3");
+        _validateActionCommon(a, operatorSig);
+        Rebuild storage rb = _rebuild[a.rigId];
+        if (rb.startedAt == 0 || rb.endedAt != 0) revert CLW_RebuildNotActive(a.rigId);
+        if (uint48(block.timestamp) > rb.deadline) revert CLW_Deadline(uint48(block.timestamp), rb.deadline);
+        if (payload.length < 96) revert("CLW:PAYLOAD3");
+
+        bytes32 proofHash = ClawBytes.slice32(payload, 32);
+        bytes32 commitHash = ClawBytes.slice32(payload, 64);
+
+        // commitHash binds the step list/ordering to an off-chain plan rendition.
+        rb.proofHash = proofHash;
+
+        bytes32 payloadHash = keccak256(payload);
+        if (payloadHash != a.payloadHash) revert CLW_PayloadMismatch(payloadHash, a.payloadHash);
+        emit RebuildPlanCommitted(a.rigId, rb.planId, keccak256(abi.encode(commitHash, proofHash)));
+    }
+
+    function markStep(Action calldata a, bytes calldata operatorSig, bytes calldata payload)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        if (a.kind != ActionKind.MarkStep) revert("CLW:KIND4");
+        _validateActionCommon(a, operatorSig);
+        Rebuild storage rb = _rebuild[a.rigId];
+        if (rb.startedAt == 0 || rb.endedAt != 0) revert CLW_RebuildNotActive(a.rigId);
+        if (uint48(block.timestamp) > rb.deadline) revert CLW_Deadline(uint48(block.timestamp), rb.deadline);
+
+        if (payload.length < 165) revert("CLW:PAYLOAD4");
+
+        uint32 planId = rb.planId;
+        Plan memory p = _plans[planId];
+
+        uint32 stepIndex;
+        uint8 code;
+        bytes32 artefactHash;
+        bytes32 noteHash;
+
+        // stepIndex @ 96..99 (first 4 bytes of the word loaded at 96)
+        uint256 w;
+        assembly {
+            w := calldataload(add(payload.offset, 96))
+        }
+        stepIndex = uint32(w >> 224);
+        code = uint8(payload[100]);
+        artefactHash = ClawBytes.slice32(payload, 101);
+        noteHash = ClawBytes.slice32(payload, 133);
+
+        if (stepIndex >= p.steps) revert CLW_StepOutOfRange(stepIndex, p.steps);
+
+        // require strictly increasing or equal step index (idempotent for repeats)
+        if (stepIndex > rb.progress) rb.progress = stepIndex;
+
+        _steps[a.rigId][stepIndex] = StepRecord({artefactHash: artefactHash, at: uint48(block.timestamp), code: code, noteHash: noteHash});
+
+        bytes32 payloadHash = keccak256(payload);
+        if (payloadHash != a.payloadHash) revert CLW_PayloadMismatch(payloadHash, a.payloadHash);
+
+        emit StepMarked(a.rigId, stepIndex, code, artefactHash, noteHash);
+    }
+
+    function finalizeRebuild(Action calldata a, bytes calldata operatorSig, bytes calldata payload)
+        external
