@@ -400,3 +400,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
     // -----------------------------
     error CLW_NotOperator(address caller);
     error CLW_NotGuardian(address caller);
+    error CLW_ZeroAddress();
+    error CLW_BadFee(uint16 feeBps);
+    error CLW_BadRig(bytes16 rigId);
+    error CLW_RigExists(bytes16 rigId);
+    error CLW_BadMode(bytes16 rigId, RigMode want, RigMode got);
+    error CLW_BadSigWindow(uint48 nowTs, uint48 validAfter, uint48 validBefore);
+    error CLW_SigExpired(uint48 nowTs, uint48 validBefore);
+    error CLW_SigTooLong(uint48 ttl, uint48 maxTtl);
+    error CLW_BadCallerGuard(address want, address got);
+    error CLW_BadNonce(uint32 got, uint32 want);
+    error CLW_PayloadMismatch(bytes32 got, bytes32 want);
+    error CLW_HeartbeatRange(uint48 seconds_, uint48 min_, uint48 max_);
+    error CLW_TooSoon(uint48 nowTs, uint48 nextAllowed);
+    error CLW_PlanTooLarge(uint32 steps, uint32 maxSteps);
+    error CLW_NoPlan(uint32 planId);
+    error CLW_NoRebuild(bytes16 rigId);
+    error CLW_RebuildActive(bytes16 rigId);
+    error CLW_RebuildNotActive(bytes16 rigId);
+    error CLW_Deadline(uint48 nowTs, uint48 deadline);
+    error CLW_StepOutOfRange(uint32 stepIndex, uint32 steps);
+    error CLW_TokenNotContract(address token);
+    error CLW_Insufficient(uint256 available, uint256 need);
+    error CLW_UnsafeETH();
+
+    // -----------------------------
+    // Events
+    // -----------------------------
+    event OperatorSet(address indexed operator, bool enabled);
+    event GuardianSet(address indexed guardian, bool enabled);
+
+    event RigRegistered(bytes16 indexed rigId, address indexed controller, bytes16 model, bytes16 region, bytes32 metaHash);
+    event RigMeta(bytes16 indexed rigId, bytes32 metaHash);
+    event RigModeChanged(bytes16 indexed rigId, RigMode previous, RigMode current);
+    event RigControllerChanged(bytes16 indexed rigId, address indexed previous, address indexed current);
+
+    event PlanCreated(uint32 indexed planId, bytes32 planHash, bytes32 toolsHash, uint32 steps, uint32 flags);
+    event PlanApproved(uint32 indexed planId, address indexed by);
+
+    event Heartbeat(bytes16 indexed rigId, address indexed by, uint48 at, RigMode mode, bytes32 payloadHash);
+    event RebuildStarted(bytes16 indexed rigId, address indexed by, uint32 indexed planId, uint48 deadline);
+    event RebuildPlanCommitted(bytes16 indexed rigId, uint32 indexed planId, bytes32 payloadHash);
+    event StepMarked(bytes16 indexed rigId, uint32 indexed stepIndex, uint8 code, bytes32 artefactHash, bytes32 noteHash);
+    event RebuildFinalized(bytes16 indexed rigId, bool success, bytes32 proofHash);
+    event RebuildAborted(bytes16 indexed rigId, bytes32 proofHash);
+
+    event FeeParams(uint16 feeBps, address indexed recipient);
+
+    event VaultDeposited(address indexed token, uint256 amount, address indexed from);
+    event VaultAllocated(address indexed token, bytes16 indexed rigId, uint256 amount, uint256 feeTaken);
+    event VaultClaimed(address indexed token, bytes16 indexed rigId, address indexed to, uint256 amount);
+    event VaultSwept(address indexed token, address indexed to, uint256 amount);
+
+    // -----------------------------
+    // Modifiers
+    // -----------------------------
+    modifier onlyOperator() {
+        if (!isOperator[msg.sender]) revert CLW_NotOperator(msg.sender);
+        _;
+    }
+
+    modifier onlyGuardian() {
+        if (!isGuardian[msg.sender]) revert CLW_NotGuardian(msg.sender);
+        _;
+    }
+
+    // -----------------------------
+    // Constructor
