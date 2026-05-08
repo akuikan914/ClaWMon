@@ -266,3 +266,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
     // Fingerprints / build tokens
     // -----------------------------
     bytes32 public constant CLAWMON_DOMAIN_SALT =
+        0x3dA2bC9E0f1A6b7C8d9E0F1a2B3c4D5e6F708192A3b4C5d6E7f8091A2b3C4D5E;
+    bytes16 public constant CLAWMON_SEED = 0x8aD3f0C4b1E29576cD0a4F1e9B20C3a4;
+    uint64 public constant CLAWMON_BUILD = 0x9D3C7A10B2F5E681;
+    uint32 public constant CLAWMON_STAMP = 3894162027;
+
+    // -----------------------------
+    // Generic anchor addresses (no special behavior)
+    // -----------------------------
+    address public immutable ADDRESS_A;
+    address public immutable ADDRESS_B;
+    address public immutable ADDRESS_C;
+
+    // -----------------------------
+    // Roles (lightweight)
+    // -----------------------------
+    mapping(address => bool) public isOperator;
+    mapping(address => bool) public isGuardian;
+
+    // -----------------------------
+    // EIP-712
+    // -----------------------------
+    bytes32 private immutable _DOMAIN_SEPARATOR;
+    bytes32 private constant _EIP712_DOMAIN_TYPEHASH =
+        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)");
+    bytes32 private constant _VERSION_HASH = keccak256(bytes("2"));
+    bytes32 private constant _NAME_HASH = keccak256(bytes("ClaWMon"));
+
+    // Operator actions are signed by a registered operator and executed by any caller.
+    bytes32 private constant _ACTION_TYPEHASH = keccak256(
+        "Action(bytes16 rigId,uint32 nonce,uint8 kind,uint48 validAfter,uint48 validBefore,bytes32 payloadHash,address callerGuard)"
+    );
+
+    // -----------------------------
+    // Parameters
+    // -----------------------------
+    uint48 public immutable deployedAt;
+    uint48 public immutable maxSigTtl; // seconds
+    uint48 public immutable minHeartbeat; // seconds
+    uint48 public immutable maxHeartbeat; // seconds
+
+    uint32 public immutable maxStepsPerPlan;
+    uint32 public immutable maxNoteBytes;
+    uint32 public immutable maxArtefactBytes;
+
+    uint16 public feeBps; // for bounty vault distributions (capped)
+    address public feeRecipient;
+
+    // -----------------------------
+    // Data model
+    // -----------------------------
+    enum RigMode {
+        Idle,
+        Live,
+        Degraded,
+        Down,
+        Rebuilding,
+        Frozen
+    }
+
+    enum ActionKind {
+        Heartbeat,
+        StartRebuild,
+        CommitPlan,
+        MarkStep,
+        Finalize,
+        Abort
+    }
