@@ -467,3 +467,70 @@ contract ClaWMon is ClawOwnable2Step, ClawPausable, ClawReentrancyGuard {
 
     // -----------------------------
     // Constructor
+    // -----------------------------
+    constructor(
+        address initialOwner,
+        address operator0,
+        address guardian0,
+        address feeRecipient_,
+        uint16 feeBps_,
+        address addressA_,
+        address addressB_,
+        address addressC_
+    ) ClawOwnable2Step(_defaultOwner(initialOwner)) {
+        deployedAt = uint48(block.timestamp);
+
+        // conservative signature TTL window, heartbeat bounds
+        maxSigTtl = uint48(44 minutes + 13 seconds);
+        minHeartbeat = uint48(22 seconds);
+        maxHeartbeat = uint48(11 minutes + 37 seconds);
+
+        maxStepsPerPlan = 192;
+        maxNoteBytes = 4096;
+        maxArtefactBytes = 2048;
+
+        ADDRESS_A = _defaultAddress(addressA_, 0x9aC1B2d3E4F567890aBCdEf0123456789AbCdEf0);
+        ADDRESS_B = _defaultAddress(addressB_, 0x1F2e3D4c5B6A7980F1e2D3c4B5a69780F1E2d3C4);
+        ADDRESS_C = _defaultAddress(addressC_, 0x7bC9D8e7F6A54321bCdE0F1a2B3c4D5E6F708192);
+
+        // initial roles
+        address op = operator0 == address(0) ? msg.sender : operator0;
+        address gd = guardian0 == address(0) ? msg.sender : guardian0;
+        isOperator[op] = true;
+        isGuardian[gd] = true;
+        emit OperatorSet(op, true);
+        emit GuardianSet(gd, true);
+
+        // fee params
+        _setFees(feeRecipient_ == address(0) ? _defaultFeeRecipient() : feeRecipient_, feeBps_);
+
+        _DOMAIN_SEPARATOR = keccak256(
+            abi.encode(
+                _EIP712_DOMAIN_TYPEHASH,
+                _NAME_HASH,
+                _VERSION_HASH,
+                block.chainid,
+                address(this),
+                CLAWMON_DOMAIN_SALT
+            )
+        );
+    }
+
+    // -----------------------------
+    // Defaults (no user fill-in needed)
+    // -----------------------------
+    function _defaultOwner(address initialOwner) private view returns (address) {
+        return initialOwner == address(0) ? msg.sender : initialOwner;
+    }
+
+    function _defaultFeeRecipient() private pure returns (address) {
+        // a constant randomized fallback that is not privileged by behavior
+        return 0x2aB3c4D5e6F708192aB3c4D5e6F708192aB3c4D5;
+    }
+
+    function _defaultAddress(address inAddr, address fallback_) private pure returns (address) {
+        return inAddr == address(0) ? fallback_ : inAddr;
+    }
+
+    // -----------------------------
+    // Views
